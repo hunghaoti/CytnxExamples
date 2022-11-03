@@ -1,3 +1,7 @@
+import sys
+
+sys.path.insert(0,"/home/hunghaoti/install/CYTNX077_dev")
+
 import time
 import numpy as np
 import cytnx as cy
@@ -16,9 +20,9 @@ def tonumpy(uniten):
 
 def vumpsMPO(W, AL, AR, C, LW = None, RW = None, eigsolve_tol = 1e-12, grad_tol = 1e-8, energy_tol = 1e-8, maxit = 50):
     acnet = cy.Network()
-    acnet.FromString(["AC: ;-1,-2,-3", "LW: ;-4,-1,0", "RW: ;-5,-3,2", "W: ;-4,-5,-2,1", "TOUT: ;0,1,2"])
+    acnet.FromString(["AC: -1;-2,-3", "LW: -4;-1,0", "RW: -5;-3,2", "W: -4,-5;-2,1", "TOUT: ;0,1,2"])
     cnet = cy.Network()
-    cnet.FromString(["LW: ;-1,-2,0", "C: -2;-3", "RW: ;-1,-3,1", "TOUT: 0;1"])
+    cnet.FromString(["LW: -1;-2,0", "C: -2;-3", "RW: -1;-3,1", "TOUT: 0;1"])
 
     D = AL.shape()[0] # bond dimension
     d = AL.shape()[1] # physical dimension
@@ -155,10 +159,10 @@ def vumpsMPO(W, AL, AR, C, LW = None, RW = None, eigsolve_tol = 1e-12, grad_tol 
             def __init__(self, net):
                 cy.LinOp.__init__(self,"mv", D*D*d, cy.Type.Double, cy.Device.cpu)
                 self.net = net
-                self.net.PutUniTensors(["LW","W","RW"],[LW, W, RW], False)
+                self.net.PutUniTensors(["LW","W","RW"],[LW, W, RW])
             def matvec(self, v):
                 vu = cy.UniTensor(v.reshape(D, d, D), 0) ## share memory, no copy
-                self.net.PutUniTensor("AC", vu, False)
+                self.net.PutUniTensor("AC", vu)
                 out = self.net.Launch(optimal=True).get_block_() # get_block_ without copy
                 out.flatten_() # only change meta, without copy.
                 return out
@@ -174,7 +178,7 @@ def vumpsMPO(W, AL, AR, C, LW = None, RW = None, eigsolve_tol = 1e-12, grad_tol 
         #     C_mat = C_mat.reshape(D, D)
         #     tensors = [LW, C_mat, RW]
         #     labels = [[2,1,-1], [1,3], [2,3,-2]]
-        #     con_order = [1,3,2]
+        #     con_order = [1applyH_C,3,2]
         #     return (ncon(tensors, labels)).flatten()
         # WeightOp = LinearOperator((D**2, D**2), matvec=MidWeights, dtype=np.float64)
         # C_temp = eigsh(WeightOp, k=1, which='SA', v0=C.flatten(),
@@ -211,19 +215,20 @@ def vumpsMPO(W, AL, AR, C, LW = None, RW = None, eigsolve_tol = 1e-12, grad_tol 
             def __init__(self, net):
                 cy.LinOp.__init__(self,"mv", D*D, cy.Type.Double, cy.Device.cpu)
                 self.net = net
-                self.net.PutUniTensors(["LW", "RW"],[LW, RW], False)
+                self.net.PutUniTensors(["LW", "RW"],[LW, RW])
 
             def matvec(self, v):
-                vu = cy.UniTensor(v.reshape(D, D), 1) ## share memory, no copy
-                self.net.PutUniTensor("C", vu, False)
+                vu = cy.UniTensor(v.reshape(D, D), 0) ## share memory, no copy
+                self.net.PutUniTensor("C", vu)
                 out = self.net.Launch(optimal=True).get_block_() # get_block_ without copy
                 out.flatten_() # only change meta, without copy.
                 return out
         # e, C_temp = cy.linalg.Lanczos_Gnd(H_C(), CvgCrit = 1.0e-8, Tin = C.get_block_().flatten(), maxiter = 10000)
         H = H_C(cnet)
+        print(H)
         e, C_temp = cy.linalg.Lanczos_ER(H, k = 1, maxiter = 10000, CvgCrit = 1e-8, Tin = C.get_block_().flatten(), max_krydim = 3)
-        C_new, u, vt = cy.linalg.Svd(cy.UniTensor(C_temp.reshape(D, D), 1))
-        C_new = cy.UniTensor(cy.linalg.Diag(C_new.get_block_()), 1)
+        C_new, u, vt = cy.linalg.Svd(cy.UniTensor(C_temp.reshape(D, D), 0))
+        C_new = cy.UniTensor(cy.linalg.Diag(C_new.get_block_()), 0)
         return u, C_new, vt
 
     def updateALAR(AL, AR, AC):
@@ -299,26 +304,26 @@ def vumpsMPO(W, AL, AR, C, LW = None, RW = None, eigsolve_tol = 1e-12, grad_tol 
 
     return AL, C, AR, LW, RW, Energy
 
-# if __name__ == '__main__':
-#     D = 32
-#     d = 2
-#     sx = cy.physics.spin(0.5,'x')
-#     sy = cy.physics.spin(0.5,'y')
-#     sp = sx+1j*sy
-#     sm = sx-1j*sy
-#     eye = cy.eye(d)
-#     W = cy.zeros([4, 4, d, d])
-#     W[0,0] = W[3,3] = eye
-#     W[0,1] = W[2,3] = 2**0.5*sp.real()
-#     W[0,2] = W[1,3] = 2**0.5*sm.real()
-#     W = cy.UniTensor(W, 0)
-#     W.permute_([1,0,2,3]) # In the paper the MPO is of lower tridiagonal
+if __name__ == '__main__':
+     D = 8
+     d = 2
+     sx = cy.physics.spin(0.5,'x')
+     sy = cy.physics.spin(0.5,'y')
+     sp = sx+1j*sy
+     sm = sx-1j*sy
+     eye = cy.eye(d)
+     W = cy.zeros([4, 4, d, d])
+     W[0,0] = W[3,3] = eye
+     W[0,1] = W[2,3] = 2**0.5*sp.real()
+     W[0,2] = W[1,3] = 2**0.5*sm.real()
+     W = cy.UniTensor(W, 0)
+     W.permute_([1,0,2,3]) # In the paper the MPO is of lower tridiagonal
 
-#     C = cy.UniTensor(cy.linalg.Diag(cy.random.normal([D], 0., 1.)), 1)
-#     C =  C / C.get_block_().Norm().item()
-#     AL = (cy.linalg.Svd(cy.UniTensor(cy.random.normal([D*d, D],0.,1.), 1))[1]).reshape(D, d, D)
-#     AR = (cy.linalg.Svd(cy.UniTensor(cy.random.normal([D, D*d],0.,1.), 1))[2]).reshape(D, d, D)
+     C = cy.UniTensor(cy.linalg.Diag(cy.random.normal([D], 0., 1.)), 0)
+     C =  C / C.get_block_().Norm().item()
+     AL = (cy.linalg.Svd(cy.UniTensor(cy.random.normal([D*d, D],0.,1.), 0))[1]).reshape(D, d, D)
+     AR = (cy.linalg.Svd(cy.UniTensor(cy.random.normal([D, D*d],0.,1.), 0))[2]).reshape(D, d, D)
 
-#     vumpsMPO(W, AL, AR, C)
+     vumpsMPO(W, AL, AR, C)
 
     

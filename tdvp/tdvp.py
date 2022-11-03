@@ -1,3 +1,7 @@
+import sys
+
+sys.path.insert(0,"/home/hunghaoti/install/CYTNX077_dev")
+
 import numpy as np
 import cytnx as cy
 from ncon import ncon
@@ -39,11 +43,11 @@ def getlr(A):
     tr = ncon([l,r],[[1,2],[1,2]])
     l/=tr**0.5
     r/=tr**0.5
-    return cy.UniTensor(cy.from_numpy(l), 1), cy.UniTensor(cy.from_numpy(r), 1)
+    return cy.UniTensor(cy.from_numpy(l), 0), cy.UniTensor(cy.from_numpy(r), 0)
 
 def getInverselr(l, r):
     l, r = tonumpy(l), tonumpy(r)
-    return cy.UniTensor(cy.from_numpy(scipy.linalg.sqrtm(scipy.linalg.inv(l))), 1), cy.UniTensor(cy.from_numpy(scipy.linalg.inv(r)), 1)
+    return cy.UniTensor(cy.from_numpy(scipy.linalg.sqrtm(scipy.linalg.inv(l))), 0), cy.UniTensor(cy.from_numpy(scipy.linalg.inv(r)), 0)
 
 def sqrtm(v):
     D, U = cy.linalg.Eigh(v.get_block())
@@ -90,9 +94,9 @@ def toSymmetricGauge(AL):
         D = Lambda.shape()[0]
 
         Lnet = cy.Network()
-        Lnet.FromString(["Lambda: ;-1,1", "Gamma: ;1,2,-3", "Lambda_: ;-2,3", "Gamma_conj: ;3,2,-4", "TOUT: ;-1,-2,-3,-4"])
+        Lnet.FromString(["Lambda: -1;1", "Gamma: ;1,2,-3", "Lambda_: -2;3", "Gamma_conj: ;3,2,-4", "TOUT: ;-1,-2,-3,-4"])
         Rnet = cy.Network()
-        Rnet.FromString(["Gamma: ;-1,2,1", "Lambda: ;1,-3", "Gamma_conj: ;-2,2,3", "Lambda_: ;3,-4", "TOUT: ;-1,-2,-3,-4"])
+        Rnet.FromString(["Gamma: ;-1,2,1", "Lambda: 1;-3", "Gamma_conj: ;-2,2,3", "Lambda_: 3;-4", "TOUT: ;-1,-2,-3,-4"])
 
         Lnet.PutUniTensors(["Lambda", "Gamma", "Lambda_", "Gamma_conj"], [Lambda, Gamma, Lambda.clone(), Gamma.Conj()])
         Ltemp = Lnet.Launch(True)
@@ -117,7 +121,7 @@ def toSymmetricGauge(AL):
         Rinv = cy.UniTensor(cy.linalg.InvM(R.get_block()), 0)
         
         net = cy.Network()
-        net.FromString(["L_conj: ;-1,1", "Lambda: ;1,2", "R: ;2,-2", "TOUT: ;-1,-2"])
+        net.FromString(["L_conj: -1;1", "Lambda: 1;2", "R: 2;-2", "TOUT: ;-1,-2"])
         net.PutUniTensors(["L_conj", "Lambda", "R"], [L.Conj(), Lambda, R])
         temp = net.Launch(True)
         temp.set_rowrank(1)
@@ -136,7 +140,7 @@ def toSymmetricGauge(AL):
     sqLambda = sqrtm(Lambda)
 
     Anet = cy.Network()
-    Anet.FromString(["sqLambda: ;-1,1", "Gamma: ;1,-2,2", "sqLambda_: ;2,-3", "TOUT: ;-1,-2,-3"])
+    Anet.FromString(["sqLambda: -1;1", "Gamma: 1;-2,2", "sqLambda_: 2;-3", "TOUT: ;-1,-2,-3"])
     Anet.PutUniTensors(["sqLambda", "Gamma", "sqLambda_"], [sqLambda, Gamma, sqLambda.clone()])
     A = Anet.Launch(True)
 
@@ -144,17 +148,28 @@ def toSymmetricGauge(AL):
     
 def getMz(A, Lambda):
 
-    '''This is for two sites as a unit cell tensor'''
+    #'''This is for two sites as a unit cell tensor'''
 
     A, Lambda = tonumpy(A), tonumpy(Lambda)
     sZ = np.array([[1.0, 0], [0, -1.0]]) # for ising
     sI =  np.array([[1.0, 0], [0, 1.0]])
-    meaa, meab = np.kron(sI,sZ), np.kron(sZ,sI)
+    #meaa, meab = np.kron(sI,sZ), np.kron(sZ,sI)
+    meaa, meab = sZ, sZ
     norm = ncon([Lambda, Lambda], [[1,2],[1,2]])
     a = ncon([Lambda, A, meaa, A.conj(), Lambda], [[5,6],[5,2,7],[2,4],[6,4,8],[7,8]])/norm
     b = ncon([Lambda, A, meab, A.conj(), Lambda], [[5,6],[5,2,7],[2,4],[6,4,8],[7,8]])/norm
     mz = 0.5*(a+b)
     return mz
+
+def getLoschmidtEcho(A0, A):
+
+    AGS = tonumpy(A0)
+    A = tonumpy(A)
+    m = A.shape[0]
+    TM = ncon([AGS, A.conj()], [[-1,1,-3], [-2,1,-4]]).reshape(m**2, m**2)
+    eigVal, r = eigs(TM, k = 1, which = 'LM')
+    loschmidt_echo = -2.0 * np.log(abs(eigVal)) / 2.0 ## since we use two site so we devide it by 2
+    return loschmidt_echo
 
 
 def tdvpSG(A0, W, dt, numiter, bicg_tol = 1e-12):
@@ -164,16 +179,17 @@ def tdvpSG(A0, W, dt, numiter, bicg_tol = 1e-12):
     # B = ncon([LAOR, lVVl, r],[[1,2,3],[1,2,-2,-1],[3,-3]])
 
     LAORnet = cy.Network()
-    LAORnet.FromString(["L: ;2,1,-1", "A: ;1,5,4", "W: ;2,3,5,-2", "R: ;3,4,-3", "TOUT: ;-1,-2,-3"])
+    LAORnet.FromString(["L: 2;1,-1", "A: ;1,5,4", "W: 2,3;5,-2", "R: 3;4,-3", "TOUT: -1;-2,-3"])
     lVVlnet = cy.Network()
-    lVVlnet.FromString(["l: -1;1", "Vl_conj: ;1,-2,2", "Vl: ;3,-3,2", "l_: -4;3","TOUT: ;-1,-2,-3,-4"])
+    lVVlnet.FromString(["l: -1;1", "Vl_conj: 1;-2,2", "Vl: 3;-3,2", "l_: -4;3","TOUT: ;-1,-2,-3,-4"])
     Bnet = cy.Network()
-    Bnet.FromString(["LAOR: ;1,2,3", "lVVl: ;1,2,-2,-1", "r: 3;-3", "TOUT: ;-1,-2,-3"])
+    Bnet.FromString(["LAOR: 1;2,3", "lVVl: ;1,2,-2,-1", "r: 3;-3", "TOUT: ;-1,-2,-3"])
     W_ = tonumpy(W) # W_ for getLW and getRW
     D = A0.shape()[0]
     dw = W.shape()[0]
     A = A0.clone()
     mzs = []
+    loschmidt_echos = []
 
     def getLW(A, l, r):
 
@@ -271,12 +287,12 @@ def tdvpSG(A0, W, dt, numiter, bicg_tol = 1e-12):
         l, r = getlr(A)
         Vl = LeftGaugefixed(A, l, r)
         L, R = getLW(A, l, r), getRW(A, l, r)
-        LAORnet.PutUniTensors(["L","A","W","R"], [L, A, W, R], False)
+        LAORnet.PutUniTensors(["L","A","W","R"], [L, A, W, R])
         LAOR = LAORnet.Launch(True)
         l, r = getInverselr(l, r)
-        lVVlnet.PutUniTensors(["l", "Vl_conj", "Vl", "l_"], [l, Vl.Conj(), Vl, l.clone()], False)
+        lVVlnet.PutUniTensors(["l", "Vl_conj", "Vl", "l_"], [l, Vl.Conj(), Vl, l.clone()])
         lVVl = lVVlnet.Launch(True)
-        Bnet.PutUniTensors(["LAOR", "lVVl", "r"], [LAOR, lVVl, r], False)
+        Bnet.PutUniTensors(["LAOR", "lVVl", "r"], [LAOR, lVVl, r])
         B = Bnet.Launch(True)
         return B
 
@@ -288,54 +304,51 @@ def tdvpSG(A0, W, dt, numiter, bicg_tol = 1e-12):
 
         A, Lambda = toSymmetricGauge(A)
         print("Iteration : %d"%ite)
-        mzs.append(getMz(A, Lambda))
+        #mzs.append(getMz(A, Lambda))
+        loschmidt_echos.append(getLoschmidtEcho(A0, A))
         B1 = getB(A); A1 = A-1j*(1/2)*B1*dt
         B2 = getB(A1); A2 = A-1j*(1/2)*B2*dt
         B3 = getB(A2); A3 = A-1j*B3*dt
         B4 = getB(A3)
         A = A - 1j * (1/6) * (B1 + 2*B2 + 2*B3 + B4) * dt
 
-    return np.asarray(mzs)
+    return np.asarray(loschmidt_echos)
 
 if __name__ == '__main__':
     
     from vumpsMPO import vumpsMPO
 
-    def ising(h = 10):
+    def ising(h):
         d = 2
         dw = 3
         sx = cy.physics.pauli('x').real()
         sz = cy.physics.pauli('z').real()
-        sI = cy.eye(d)
         M = cy.zeros([dw, dw, d, d])
-        M[0,0] = sI; M[2,2] = sI
-        M[0,1] = sx; M[1,2] = -sx
-        M[0,2] = h * sz
+        M[0,0] = M[2,2] = cy.eye(d)
+        M[1,0] = sz
+        M[2,1] = -sz
+        M[2,0] = h*sx
         M = cy.UniTensor(M, 0)
-        M.permute_([1,0,2,3]) # In the paper the MPO is of lower tridiagonal
         M_ = M.clone()
         M.set_labels([-1,1,-3,-5]); M_.set_labels([1,-2,-4,-6])
         MM = cy.Contract(M, M_)
         MM.permute_([0,3,1,4,2,5])
-        MM.reshape_(dw, dw, 4, 4)
+        MM.reshape_(dw, dw, 2*d, 2*d, rowrank=2)
         # MM.print_diagram()
         return MM
 
-    ''' Quench dynamics in TFIM (h = 10 ~ h = 3) '''
-
-    d = 4
-    D = 10
-    M = ising(h = 10)
-
-    C = cy.UniTensor(cy.linalg.Diag(cy.random.normal([D], 0., 1.)), 1)
+    M = ising(h = 1.)
+    D = 8
+    d = M.shape()[2]
+    C = cy.UniTensor(cy.random.normal([D,D], 0., 1.), 0)
     C =  C / C.get_block_().Norm().item()
-    AL = (cy.linalg.Svd(cy.UniTensor(cy.random.normal([D*d, D],0.,1.), 1))[1]).reshape(D, d, D)
-    AR = (cy.linalg.Svd(cy.UniTensor(cy.random.normal([D, D*d],0.,1.), 1))[2]).reshape(D, d, D)
+    AL = (cy.linalg.Svd(cy.UniTensor(cy.random.normal([D*d, D],0.,1.), 0))[1]).reshape(D, d, D)
+    AR = (cy.linalg.Svd(cy.UniTensor(cy.random.normal([D, D*d],0.,1.), 0))[2]).reshape(D, d, D)
 
     AL, C, AR, LW, RW, Energy = vumpsMPO(M, AL, AR, C, maxit = 50) # Find ground state with VUMPS
 
-    M = ising(h = 3)
-    datas = tdvpSG(A0 = AL, W = M, dt = 0.01, numiter = 400, bicg_tol = 1e-12)
+    M = ising(h = 0.2)
+    datas = tdvpSG(A0 = AL, W = M, dt = 0.01, numiter = 600, bicg_tol = 1e-12)
     savename = "tdvp_ising_D%d"%D
     np.save(savename, datas)
 
